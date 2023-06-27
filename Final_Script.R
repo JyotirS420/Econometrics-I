@@ -1,0 +1,636 @@
+
+
+
+setwd("/Users/jyotir/Desktop/Econometrics-I/Data_Related/Election/")
+getwd()
+
+################################## RUN FROM MODEL WITH REGRESSORS ########################################################
+
+library(stringr)
+library(tidyverse)
+library(hash)
+library(stargazer)
+library(magrittr)
+library(dplyr)
+library(Hmisc)
+library(lmtest)
+library(nlme)
+library(data.table)
+library(fixest)
+library(stats4)
+library(strucchange)
+#library(bblme)
+library(olsrr)
+
+
+
+
+df_here <- read.csv("/Users/jyotir/Desktop/Econometrics-I/Data_Related/Election/Group9.csv")
+View(df_here)
+
+######################################### CREATING THE DATA FILE ###########################################################
+
+# 'Arsenic','Carbonate','Calcium','Chloride','Electrical_Conductivity','Fluorine','Iron','Potassium'
+# ,'Magnesium','Nitrate','Sodium','Percentage_Sodium','Phosphate_Ion','Residual_Sodium_Carbonate'
+# ,'Sodium_Absorption_Ratio','Sulfate','Silicon_Dioxide','Hardness_Total','Alkalinity_Total'
+# ,'Total_Dissolved_Solids','Potential_Of_Hydrogen',
+#df_here <- as.data.frame(df_here)
+df_here$State_Year <- NA
+for(i in 1:length(df_here$row_id)){
+  year <- as.character(df_here[i,"SourceYear"])
+  state <- as.character(df_here[i,"State"])
+  state_year <- paste(state,year,sep="_")
+  df_here[i,"State_Year"] <- state_year
+}
+View(df_here)
+
+
+df_state <- df_here %>% 
+  group_by(State_Year) %>% 
+  summarise(
+    State = max(State),
+    SourceYear = max(SourceYear),
+    Hydrogencarbonate = mean(Hydrogencarbonate, na.rm = TRUE,),
+    Alkalinity_Total = mean(Alkalinity_Total, na.rm = TRUE),
+    SDP = mean(SDP, na.rm = TRUE),
+    Gini_Coefficient = mean(Gini_Coefficient, na.rm = TRUE)
+    #, .groups =  (State,SourceYear)
+  ) #%>% ungroup()
+
+#summarize_at(c('Hydrogencarbonate','Alkalinity_Total','SDP', 'Gini_Coefficient'),mean)
+#,'','','','','','','','',
+View(df_state)
+
+
+
+wm_df <- read.csv("/Users/jyotir/Desktop/Econometrics-I/Data_Related/Election/Election Win Margins.csv", check.names = FALSE)
+View(wm_df)
+df_state_DF <- as.data.frame(df_state)
+df_state_DF$win_margin = NA
+
+# loop through each row in df and add win margin from wm_df
+for (i in 1:nrow(df_state_DF)) {
+  state <- df_state_DF[i, "State"]
+  year <- as.character(df_state_DF[i, "SourceYear"])
+  if (state %in% wm_df$WinMargins) {
+    win_margin <- wm_df[wm_df$WinMargins == state, year]
+    df_state_DF[i, "win_margin"] <-  win_margin
+  } else {
+    df_state_DF[i, "win_margin"] <-  NA
+  }
+}
+View(df_state_DF)
+
+
+lr_df <- read.csv("/Users/jyotir/Desktop/Econometrics-I/Data_Related/Election/LiteracyRate - Sheet1.csv", check.names = FALSE)
+View(lr_df)
+
+literacy_rate_list <- c()
+df_state_DF$literacy_rate <- NA
+
+for (i in 1:nrow(df_state_DF)) {
+  state <- df_state_DF[i, "State"]
+  year <- as.character(df_state_DF[i, "SourceYear"])
+  if (state %in% lr_df$States) {
+    literacy_rate <- lr_df[lr_df$States == state, year]
+    df_state_DF[i, "literacy_rate"] <- literacy_rate
+  } else {
+    df_state_DF[i, "literacy_rate"] <- NA
+  }
+}
+
+
+View(df_state_DF)
+
+
+gii_df <- read.csv("/Users/jyotir/Desktop/Econometrics-I/Data_Related/Election/GII_Rate - Sheet1.csv", check.names = FALSE)
+View(gii_df)
+
+df_state_DF$gii_rate <- NA
+
+for (i in 1:nrow(df_state_DF)) {
+  state <- df_state_DF[i, "State"]
+  year <- as.character(df_state_DF[i, "SourceYear"])
+  if (state %in% gii_df$States) {
+    gii_rate <- gii_df[gii_df$States == state, year]
+    df_state_DF[i, "gii_rate"] <- gii_rate
+  } else {
+    df_state_DF[i, "gii_rate"] <- NA
+  }
+}
+
+
+View(df_state_DF)
+
+
+
+enpp_df <- read.csv("/Users/jyotir/Desktop/Econometrics-I/Data_Related/Election/ENPPIndex - Sheet1.csv")
+View(enpp_df)
+
+
+
+# for (i in 1:length(enpp_df$State)){
+#   if(is.na(enpp_df[i,"ENPP"])){
+#     enpp_df[i,"ENPP"] = NaN
+#   }
+# }
+
+#enpp_df <- enpp_df[!is.na(enpp_df$ENPP),]
+#View(enpp_df)
+
+
+h_enpp <- Dict$new(
+  SomethingNew = as.numeric(1.1),
+  .class = "any",
+  .overwrite = TRUE
+)
+
+
+for (i in 1:length(enpp_df$State)){
+  state_name <- enpp_df[i,"State"]
+  year_numeric <- enpp_df[i,"Year"]
+  year_string <- as.character(year_numeric)
+  final_key = paste(state_name,year_string,sep="_")
+  h_enpp[final_key] = as.numeric(enpp_df[i,"ENPP"])
+}
+View(h_enpp)
+
+enpp_list <- c()
+#Iterating through df_unique
+for (i in 1:length(df_state$SourceYear)){
+  
+  #Finding the state_name and year for each row
+  state_name <-  df_state[i,"State"]
+  year <-  df_state[i,"SourceYear"]
+  
+  #Creating the key as per the above format
+  key <-  paste(state_name,year,sep="_")
+  
+  
+  #Finding the value
+  value <-  h_enpp[key]
+  #print(h[key])
+  
+  #Appending it to sdp_list
+  enpp_list <- append(enpp_list,value)
+  
+}
+
+
+length(enpp_list)
+
+
+#Adding enpp_list as another column in df_unique
+df_state_DF %<>% mutate(ENPP = enpp_list)
+View(df_state_DF)
+df_state_DF_om <- df_state_DF
+df_state_DF_om %<>% select(State_Year, SourceYear, State, Hydrogencarbonate,  SDP,
+                           win_margin, literacy_rate, gii_rate, ENPP, Gini_Coefficient)
+View(df_state_DF_om)
+df_state_DF_om <- na.omit(df_state_DF_om)
+
+View(df_state_DF_om)
+
+
+
+write.csv(df_state_DF, "/Users/jyotir/Desktop/Econometrics-I/Data_Related/Election/MergedData_STATE.csv", row.names=FALSE)
+
+
+
+#########################################  MODEL WITH REGRESSORS ##########################################################
+
+df_state_DF <- read.csv("/Users/jyotir/Desktop/Econometrics-I/Data_Related/Election/State/MergedData_STATE_FINAL.csv")
+df_state_DF_om <- as.data.frame(df_state_DF)
+df_state_DF_om %<>% select(State_Year, SourceYear, State, Hydrogencarbonate,  SDP,
+                           win_margin, literacy_rate, gii_rate, ENPP, gini_state)
+View(df_state_DF_om)
+df_state_DF_om <- na.omit(df_state_DF_om)
+View(df_state_DF_om)
+
+sdp_list_squared <- (df_state_DF_om$SDP^2)
+sdp_list_cubed <- (df_state_DF_om$SDP^3)
+df_state_DF_om %<>% mutate(SDP2 = sdp_list_squared)
+df_state_DF_om %<>% mutate(SDP3 = sdp_list_cubed)
+View(df_state_DF_om)
+typeof(df_state_DF_om)
+
+
+
+
+check_corr <- df_state_DF_om
+check_corr %<>% select(SDP, SDP2, SDP3, gini_state, win_margin, literacy_rate, gii_rate, ENPP)
+
+#res <- rcorr(as.matrix(check_corr)) # rcorr() accepts matrices only
+res <- cor(check_corr)
+
+# display correlation values (rounded to 3 decimals)
+round(res, 3)
+
+
+
+
+hydrogencarb_model <- lm(formula = Hydrogencarbonate ~ SDP + (gini_state) + #gii_rate +
+                           win_margin + (literacy_rate) + (ENPP) 
+                         , data = df_state_DF_om)
+
+summary(hydrogencarb_model)
+#hydrogencarb_model$model
+
+bptest(hydrogencarb_model)
+
+
+u_hat <- resid(hydrogencarb_model)
+log_u_hat <- log((u_hat)^2)
+reg_u_hat <- lm(log_u_hat ~ #SDP + SDP2  + #literacy_rate +
+                  win_margin +  ENPP, data = df_state_DF_om)
+g_hat <- fitted(reg_u_hat)
+h_hat <- exp(g_hat)
+w <- 1/h_hat
+
+
+hydrogencarb_model <- lm(formula = Hydrogencarbonate ~ SDP + gini_state +  #gii_rate +
+                           win_margin + literacy_rate + ENPP 
+                         , data = df_state_DF_om
+                         , weights = w)
+
+summary(hydrogencarb_model)
+length(hydrogencarb_model$residuals)
+#hydrogencarb_model$model
+
+bptest(hydrogencarb_model)
+
+
+############################################# MONTE CARLO 1##################################################################
+
+#Hydrogencarbonate = beta_0 + beta_1*SDP + beta_2*gini_state + beta_3*win_margin + beta_4*literacy_rate + beta_5*ENPP
+
+View(hydrogencarb_model)
+
+
+beta_0 = hydrogencarb_model$coefficients[1] # Intercept 
+beta_1 = hydrogencarb_model$coefficients[2]
+beta_2 = hydrogencarb_model$coefficients[3]
+beta_3 = hydrogencarb_model$coefficients[4]
+beta_4 = hydrogencarb_model$coefficients[5]
+beta_5 = hydrogencarb_model$coefficients[6]
+residual_list_regular <- residuals(hydrogencarb_model)
+u_mean = mean(residual_list_regular)
+u_stddev = sd(residual_list_regular)
+
+
+set.seed(NULL)  # Seed
+
+M = 500     # Number of experiments/iterations
+
+## Storage 
+intercept_DT <- rep(0.0,M)
+beta_1_DT <- rep(0.0,M)
+beta_2_DT <- rep(0.0,M)
+beta_3_DT <- rep(0.0,M)
+beta_4_DT <- rep(0.0,M)
+beta_5_DT <- rep(0.0,M)
+
+X_40 <- sample(1:387,40, replace=F)
+X_80 <- sample(1:387,80, replace=F)
+X_160 <- sample(1:387,160, replace=F)
+X_260 <- sample(1:387,260, replace=F)
+X_360 <- sample(1:387,360, replace=F)
+
+#n = 2000     # Sample size
+for(number in c(40,80,160,260,360)){
+  
+  if(number==40){
+    X_n <- X_40
+  }
+  if(number==80){
+    X_n <- X_80
+  }
+  if(number==160){
+    X_n <- X_160
+  }
+  if(number==260){
+    X_n <- X_260
+  }
+  if(number==360){
+    X_n <- X_360
+  }
+  
+  X_n_sdp <- c()
+  X_n_gini <- c()
+  X_n_wm <- c()
+  X_n_lr <- c()
+  X_n_enpp <- c()
+  for(i in 1:length(X_n)){
+    val <- X_n[i]
+    X_n_sdp <- append(X_n_sdp,df_state_DF_om[val, "SDP"])
+    X_n_gini <- append(X_n_gini,df_state_DF_om[val, "gini_state"])
+    X_n_wm <- append(X_n_wm,df_state_DF_om[val, "win_margin"])
+    X_n_lr <- append(X_n_lr,df_state_DF_om[val, "literacy_rate"])
+    X_n_enpp <- append(X_n_enpp,df_state_DF_om[val, "ENPP"])
+  }
+  
+  #View(X_n_sample)
+  
+  
+  ## Begin Monte Carlo
+  
+  for (i in 1:M){ #  M is the number of iterations
+    
+    # Generate data
+    U_i = rnorm(number, mean = u_mean, sd = u_stddev) # Error
+    #X_sdp = X_n_sample # Independent variable
+    
+    Y_i = beta_0 + (beta_1*X_n_sdp) + (beta_2*X_n_gini) +(beta_3*X_n_wm) +(beta_4*X_n_lr) +(beta_5*X_n_enpp) +U_i  
+    
+    # Formulate data.table
+    data_i = data.table(Y = Y_i, X1 = X_n_sdp, X2 = X_n_gini, X3 = X_n_wm, X4 = X_n_lr, X5 = X_n_enpp)
+    
+    # Run regressions 
+    ols_i <- fixest::feols(data = data_i, Y ~ X1 + X2 + X3 + X4 + X5)
+    
+    # Extract slope coefficient and save
+    intercept_DT[i] <- ols_i$coefficients[1]
+    beta_1_DT[i] <- ols_i$coefficients[2]
+    beta_2_DT[i] <- ols_i$coefficients[3]
+    beta_3_DT[i] <- ols_i$coefficients[4]
+    beta_4_DT[i] <- ols_i$coefficients[5]
+    beta_5_DT[i] <- ols_i$coefficients[6]
+    
+    
+  }
+  
+  # Summary statistics
+  #print("ADKASJDKSAJD")
+  estimates_DT <- data.table(beta_0 = intercept_DT, beta_1 = beta_1_DT, beta_2 = beta_2_DT, beta_3 = beta_3_DT,
+                             beta_4 = beta_4_DT, beta_5 = beta_5_DT)
+  stargazer(estimates_DT[, c("beta_0","beta_1", "beta_2", "beta_3")], type = "text")
+  stargazer(estimates_DT[, c("beta_4", "beta_5")], type = "text")
+  
+  # Visual inspection
+  hist(estimates_DT[, beta_1],xlim = c(0,0.0004))
+  #hist(estimates_DT[, beta_1])
+  
+}
+summary(hydrogencarb_model)
+#View(estimates_DT)
+
+
+
+#############################################  MLE 1 ############################################################################
+
+mle_data<-df_state_DF_om
+mle_data %<>% select(State_Year, SourceYear, State, Hydrogencarbonate,  SDP,
+                     win_margin, literacy_rate, gii_rate, ENPP, gini_state)
+
+mle_model <- lm(Hydrogencarbonate ~ SDP + gini_state +  #SDP2 + SDP3 +
+                  win_margin + literacy_rate + ENPP, data = mle_data)
+
+
+# Define log-likelihood function
+logLikelihood_lm <- function(beta, mle_data) {
+  # Extract variables from mle_data
+  X <- mle_data[, c("SDP", "gini_state", "win_margin", "literacy_rate", "ENPP")]
+  y <- mle_data$Hydrogencarbonate
+  
+  # Calculate linear predictor and residuals, mu should be yi-hat
+  mu <- predict(mle_model, newdata = mle_data)
+  epsilon <- y - mu
+  
+  # Calculate log-likelihood
+  n <- length(y)
+  sigma <- exp(beta[length(beta)]) # transform last parameter to ensure positivity, std dev/ varaiance of u 
+  logLik <- -n/2*log(2*pi*sigma^2) - sum(epsilon^2)/(2*sigma^2)
+  
+  return(-logLik)
+}
+
+# Set starting values for coefficients
+#coef(mle_model)[-1]
+startValues <- c(coef(mle_model)[-1], log(sd(resid(mle_model)))) #starting from OLS values
+
+# Use maximum likelihood estimation to estimate coefficients assuming a normal distribution
+fit_lm <- optim(par = startValues, fn = logLikelihood_lm, mle_data = mle_data, method = "BFGS")
+
+# Print estimated coefficients
+
+# fit lm ke pehle 8 were estimates, last value is sigmaa that is why e^ since we log transformed
+coef_lm <- c(fit_lm$par[1:6], exp(fit_lm$par[9])) # transform last parameter back to original scale
+names(coef_lm) <- c("SDP", "gini_state", "win_margin", "literacy_rate", "ENPP", "sigma")
+print(coef_lm)
+summary(mle_model)
+
+
+
+
+
+
+
+
+#############################################  STRUCTURAL BREAK MODEL #######################################################
+
+#Defining the lists of North, South, East, West and Central States
+DNorth_States <- c("Jammu And Kashmir","Himachal Pradesh","Delhi","Punjab","Haryana","Rajasthan","Uttarakhand","Chandigarh","Uttar Pradesh")
+DSouth_States <- c("Kerala","Andhra Pradesh","Tamil Nadu","Telangana","Pondicherry")
+DEast_States <- c("Assam","Manipur","Tripura","Sikkim","West Bengal","Odisha","Andaman And Nicobar Islands","Arunachal Pradesh","Bihar","Nagaland","Meghalaya","Mizoram")
+DWest_States <- c("Gujarat","Maharashtra","Karnataka","The Dadra And Nagar Haveli And Daman And Diu","Goa")
+DCentral_States <- c("Madhya Pradesh","Chhattisgarh","Jharkhand")
+
+#Initialising empty vectors to add to the data frame
+DNorth <- c()
+DSouth <- c()
+DEast <- c()
+DWest <- c()
+DCentral <- c()
+
+
+
+#Iterating through all observations
+for (i in 1:length(df_state_DF_om$SourceYear)){
+  if (df_state_DF_om[i,"State"] %in% DNorth_States==TRUE){
+    DNorth <- append(DNorth,1)
+    DSouth <- append(DSouth,0)
+    DEast <- append(DEast,0)
+    DWest <- append(DWest,0)
+    DCentral <- append(DCentral,0)
+  }
+  else if (df_state_DF_om[i,"State"] %in% DSouth_States==TRUE){
+    DNorth <- append(DNorth,0)
+    DSouth <- append(DSouth,1)
+    DEast <- append(DEast,0)
+    DWest <- append(DWest,0)
+    DCentral <- append(DCentral,0)
+  }
+  else if (df_state_DF_om[i,"State"] %in% DEast_States==TRUE){
+    DNorth <- append(DNorth,0)
+    DSouth <- append(DSouth,0)
+    DEast <- append(DEast,1)
+    DWest <- append(DWest,0)
+    DCentral <- append(DCentral,0)
+  }
+  else if (df_state_DF_om[i,"State"] %in% DWest_States==TRUE){
+    DNorth <- append(DNorth,0)
+    DSouth <- append(DSouth,0)
+    DEast <- append(DEast,0)
+    DWest <- append(DWest,1)
+    DCentral <- append(DCentral,0)
+  }
+  else if (df_state_DF_om[i,"State"] %in% DCentral_States==TRUE){
+    DNorth <- append(DNorth,0)
+    DSouth <- append(DSouth,0)
+    DEast <- append(DEast,0)
+    DWest <- append(DWest,0)
+    DCentral <- append(DCentral,1)
+  }
+  else{
+    DNorth <- append(DNorth,0)
+    DSouth <- append(DSouth,0)
+    DEast <- append(DEast,0)
+    DWest <- append(DWest,0)
+    DCentral <- append(DCentral,0)
+  }
+}
+#sum(DNorth)
+#Adding each vector to the data frame
+df_state_DF_om %<>% mutate(DNorth = DNorth)
+df_state_DF_om %<>% mutate(DSouth = DSouth)
+df_state_DF_om %<>% mutate(DEast = DEast)
+df_state_DF_om %<>% mutate(DWest = DWest)
+df_state_DF_om %<>% mutate(DCentral = DCentral)
+
+View(df_state_DF_om)
+
+
+#View(hydrogencarb_model)
+#hydrogencarb_model$residuals[1]
+
+
+
+df_hydrogencarb_str_br <- df_state_DF_om
+df_hydrogencarb_str_br %<>% select(SourceYear, State, Hydrogencarbonate, SDP, SDP2, SDP3, gini_state,
+                                   win_margin, literacy_rate, gii_rate, ENPP, DNorth, DSouth, DEast, DWest, DCentral)
+df_hydrogencarb_str_br <- na.omit(df_hydrogencarb_str_br)
+View(df_hydrogencarb_str_br)
+
+
+
+
+#View(df_hydrogencarb_str_br)
+
+
+structbreak_hydrogencarb_model <- lm(formula = Hydrogencarbonate ~ SDP + gini_state +
+                                       win_margin + literacy_rate + ENPP
+                                     + DNorth + DSouth + DEast + DWest
+                                     + DNorth*ENPP + DSouth*ENPP + DEast*ENPP + DWest*ENPP
+                                     , data = df_hydrogencarb_str_br)
+#DCentral DNorth
+summary(structbreak_hydrogencarb_model)
+
+bptest(structbreak_hydrogencarb_model)
+
+
+u_hat_strbk <- resid(structbreak_hydrogencarb_model)
+log_u_hat_strbk <- log((u_hat_strbk)^2)
+reg_u_hat_strbk <- lm(log_u_hat_strbk ~  #SDP + #SDP2  + SDP3 +
+                        win_margin + literacy_rate #+literacy_rate  + gii_rate + win_margin
+                      # + DNorth + DSouth + DEast + DWest
+                      # + DNorth*ENPP + DSouth*ENPP + DEast*ENPP + DWest*ENPP
+                      , data = df_hydrogencarb_str_br)
+g_hat_strbk <- fitted(reg_u_hat_strbk)
+h_hat_strbk <- exp(g_hat_strbk)
+w_strbk <- 1/h_hat_strbk
+
+
+structbreak_hydrogencarb_model <- lm(formula = Hydrogencarbonate ~ SDP + gini_state +
+                                       win_margin + literacy_rate + ENPP
+                                     + DNorth + DSouth + DEast + DWest
+                                     + DNorth*literacy_rate + DSouth*literacy_rate + DEast*literacy_rate + DWest*literacy_rate
+                                     , data = df_hydrogencarb_str_br
+                                     , weights = w_strbk)
+
+#DCentral DNorth
+summary(structbreak_hydrogencarb_model)
+#hydrogencarb_model$model
+
+bptest(structbreak_hydrogencarb_model)
+
+
+
+#
+
+View(df_hydrogencarb_str_br)
+check_corr_str_br <- df_hydrogencarb_str_br
+check_corr_str_br %<>% select(SDP, SDP2, SDP3, gini_state, win_margin, literacy_rate, gii_rate, ENPP,
+                              DNorth, DSouth, DEast, DWest, DCentral)
+
+#res <- rcorr(as.matrix(check_corr)) # rcorr() accepts matrices only
+res_str_br <- cor(check_corr_str_br)
+
+# display correlation values (rounded to 3 decimals)
+round(res_str_br, 3)
+
+
+
+
+
+
+
+
+############################################# Q2 ##################################################################
+
+
+old_data <- read.csv(("/Users/jyotir/Desktop/Econometrics-I/Data_Related/Election/Group9.csv"))
+View(old_data)
+old_sdp_squared <- (old_data$SDP^2)
+old_sdp_cubed <- (old_data$SDP^3)
+old_data %<>% mutate(SDP2 = old_sdp_squared)
+old_data %<>% mutate(SDP3 = old_sdp_cubed)
+View(old_data)
+old_data %<>% select(SourceYear, State, District, Hydrogencarbonate,  SDP, SDP2, SDP3, Gini_Coefficient)
+old_data <- na.omit(old_data)
+
+prev_model <- lm(formula = Hydrogencarbonate ~ SDP + SDP2 + SDP3 + Gini_Coefficient
+                 , data = old_data
+)
+
+summary(prev_model)
+
+View(df_state_DF_om)
+q2_model <- lm(formula = Hydrogencarbonate ~ SDP + SDP2 + SDP3 + gini_state
+               , data = df_state_DF_om
+)
+summary(q2_model)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
